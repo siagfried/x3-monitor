@@ -33,6 +33,6 @@ if (( PURGE )); then
 else
   [[ ! -L $ROOT/venv ]] || { echo 'Refusing symlink venv'; exit 1; }
   rm -rf -- /opt/x3-monitor/venv
-  rm -f -- "$ROOT/monitor.py" "$ROOT/dashboard.html" "$ROOT/push_support.py" "$ROOT/provider.py" "$ROOT/configure.py" "$ROOT/sw.js" "$ROOT/manifest.webmanifest" "$ROOT/icon.svg" "$ROOT/install_dependencies.py" "$ROOT/initialize_push.py" "$ROOT/requirements.txt" "$ROOT/uninstall.sh"
+  rm -f -- "$ROOT/billing.py" "$ROOT/monitor.py" "$ROOT/dashboard.html" "$ROOT/push_support.py" "$ROOT/provider.py" "$ROOT/configure.py" "$ROOT/sw.js" "$ROOT/manifest.webmanifest" "$ROOT/icon.svg" "$ROOT/install_dependencies.py" "$ROOT/initialize_push.py" "$ROOT/requirements.txt" "$ROOT/uninstall.sh"
   echo 'Removed service and program. KEEP /opt/x3-monitor/data and config.json (contains credentials). Reinstall to resume.'
 fi

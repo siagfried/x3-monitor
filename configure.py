@@ -75,86 +75,98 @@ def port_number(value):
 
 def make_config(dns, veid, key, panel_url, username, password, local_port=8098,
                 https_port=8443, connect_host='', ca_file='',
-                panel_link='', timezone='Asia/Shanghai', token=''):
-    if not veid.isdigit() or not key or any(c.isspace() for c in key):
+                panel_link='', timezone='Asia/Shanghai', token='', network='tailnet', origin='', web_username='', web_password='', tls_cert='', tls_key=''):
+    if bool(veid)!=bool(key) or (veid and not veid.isdigit()) or any(c.isspace() for c in key):
         raise ValueError('VEID 需为数字，API Key 不得为空或包含空白。')
     parsed = urlsplit(panel_url)
     if parsed.query or parsed.fragment or parsed.password:
         raise ValueError('面板地址不能含查询参数、账号密码或片段。')
     if connect_host not in ('', '127.0.0.1', '::1'):
         raise ValueError('本机连接地址只能使用 loopback。')
-    origin = f'https://{dns}:{https_port}'
+    origin = f'https://{dns}:{https_port}' if network=='tailnet' else origin.rstrip('/')
+    public=urlsplit(origin)
+    if public.scheme not in ('http','https') or not public.hostname or public.username or public.query or public.fragment or public.path not in ('','/'):
+        raise ValueError('Invalid dashboard origin')
+    if network!='tailnet' and not (public.scheme=='http' and public.hostname in ('127.0.0.1','::1','localhost')) and (public.scheme!='https' or not web_username or len(web_password)<16):
+        raise ValueError('Public access requires HTTPS and a login password of at least 16 characters')
+    if network=='direct' and (public.port or 443)!=local_port:
+        raise ValueError('Direct HTTPS origin port must equal the monitor port')
     if panel_link:
         link = urlsplit(panel_link)
-        if link.scheme != 'https' or link.hostname != dns or link.username or link.query or link.fragment:
+        if link.scheme != 'https' or (network=='tailnet' and link.hostname != dns) or link.username or link.query or link.fragment:
             raise ValueError('入口链接需为本机 Tailnet HTTPS 地址，可留空隐藏。')
     ZoneInfo(timezone)
     cfg = dict(panel=dict(url=panel_url, username=username, password=password, token=token,
                           ca_file=ca_file, timeout=15, list_path='panel/api/inbounds/list', connect_host=connect_host),
-               web=dict(host='127.0.0.1', port=local_port, auth=False, public_origin=origin),
+               web=dict(host='0.0.0.0' if network=='direct' else '127.0.0.1', port=local_port, auth=network in ('proxy','direct'), public_origin=origin,username=web_username,password=web_password,tls_cert=tls_cert,tls_key=tls_key),
                timezone=timezone, interval_seconds=60, max_gap_seconds=150,
                database=str(ROOT/'data/monitor.sqlite3'), retention_days=365,
                panel_link=panel_link, provider=dict(veid=veid, api_key=key),
-               installer=dict(manage_serve=True, https_port=https_port))
+               installer=dict(manage_serve=network=='tailnet', network=network, https_port=https_port))
     monitor.validate(cfg)
     return cfg
 
 
 def wizard():
     if not sys.stdin.isatty():
-        raise ValueError('请在交互终端运行 sudo bash install.sh；不要将脚本通过管道直接执行。')
-    dns, current = tailnet()
-    print('''X3 Monitor 安装向导 / Setup wizard
-仅支持 BandwagonHost（搬瓦工）/ BandwagonHost only.
-必须预先安装并运行 3x-ui / Install and run 3x-ui before using this installer.
-
-VEID / API Key 获取方式：
-1. 登录 https://bandwagonhost.com/clientarea.php
-2. Services → My Services → 目标 VPS → KiwiVM Control Panel。
-3. KiwiVM 左侧选择 API，复制页面显示的 VEID；点击 Show API Key 查看密钥。
-   使用已有密钥即可；不要点击 Reset API Key，以免影响其他应用。
-   API 页面和文档：https://kiwivm.64clouds.com/api-doc.php
-Get VEID / API Key:
-Sign in at https://bandwagonhost.com/clientarea.php → Services → My Services →
-your VPS → KiwiVM Control Panel → API. Copy VEID and click Show API Key.
-Use your existing key; do not reset it, as other applications may depend on it.
-密钥输入不会回显，仅写入本机受限配置，不进入安装日志。
-Secret input is hidden and stored in a restricted local config, never printed.
-
-还需要 3x-ui 的 API 连接信息；网页本身仅通过 Tailnet 访问，无额外监控登录。
-安装不会改动或重启 3x-ui / Xray，不会改动订阅端口或公网防火墙。
-''')
-    veid = ask('VEID')
-    key = ask('KiwiVM API Key（隐藏输入）', secret=True)
-    panel_url = ask('3x-ui 完整地址（含端口和面板路径；HTTPS 请用证书域名）')
-    token = ask('3x-ui API Token（没有则直接回车，随后输入用户名和密码）', secret=True)
-    username = '' if token else ask('3x-ui 用户名')
-    password = '' if token else ask('3x-ui 密码（隐藏输入）', secret=True)
-    parsed = urlsplit(panel_url)
-    default_host = '' if parsed.hostname in ('127.0.0.1', '::1', 'localhost') else '127.0.0.1'
-    print('证书域名可经 127.0.0.1 连接并保留证书验证 / A certificate hostname can connect over loopback with TLS hostname verification.')
-    connect_host = ask('本机连接地址（填 - 使用面板域名解析）', default_host)
-    if connect_host == '-':
-        connect_host = ''
-    ca_file = ask('自签名证书的 CA 文件绝对路径（公共可信证书直接回车）')
-    local_port = port_number(ask('监控本机端口', '8098'))
-    https_port = port_number(ask('Tailnet HTTPS 端口（请勿使用订阅端口）', '8443'))
-    require_route_available(current, dns, https_port, f'http://127.0.0.1:{local_port}')
-    with socket.socket() as sock:
-        sock.bind(('127.0.0.1', local_port))
-    panel_link = ask('已有 3x-ui Tailnet HTTPS 入口（无则回车；不会新建或修改面板转发）')
-    timezone = ask('显示时区', 'Asia/Shanghai')
-    cfg = make_config(dns, veid, key, panel_url, username, password, local_port,
-                      https_port, connect_host, ca_file, panel_link, timezone, token)
-    print('只读检查 3x-ui 与 KiwiVM API / Checking existing 3x-ui and KiwiVM read-only APIs…')
+        raise ValueError('Run sudo bash install.sh in an interactive terminal / 请在交互终端运行')
+    print('X3 Monitor / 安装向导\n需预先安装并运行 3x-ui / An existing working 3x-ui installation is required.\n不限制 VPS 服务商；Tailscale 与 BandwagonHost API 均为可选。\nAny VPS provider is supported. Tailscale and BandwagonHost API are optional.\n不修改或重启 3x-ui / Xray，不修改订阅及防火墙。\nThe installer never modifies/restarts 3x-ui/Xray, subscriptions or firewall rules.\n')
+    mode=ask('访问方式 / Access: 1=Tailnet, 2=HTTPS reverse proxy, 3=direct HTTPS, 4=localhost HTTP','2')
+    network={'1':'tailnet','2':'proxy','3':'direct','4':'local'}.get(mode)
+    if not network:raise ValueError('Invalid access mode')
+    dns,current=tailnet() if network=='tailnet' else ('',{})
+    print("""可选 / Optional: BandwagonHost → KiwiVM → API → VEID / Show API Key.
+https://bandwagonhost.com/clientarea.php
+https://kiwivm.64clouds.com/api-doc.php
+不填 API 时使用网页手动额度 / Leave blank for manual allowance and reset settings.""")
+    veid=ask('VEID（不使用 API 请回车 / blank to skip）')
+    key=ask('KiwiVM API Key（隐藏输入）',secret=True) if veid else ''
+    panel_url=ask('3x-ui 完整地址（含端口和面板路径；HTTPS 请用证书域名）')
+    token=ask('3x-ui API Token（没有则直接回车，随后输入用户名和密码）',secret=True)
+    username='' if token else ask('3x-ui 用户名')
+    password='' if token else ask('3x-ui 密码（隐藏输入）',secret=True)
+    parsed=urlsplit(panel_url)
+    default_host='127.0.0.1' if parsed.scheme=='https' and parsed.hostname not in ('127.0.0.1','::1','localhost') else ''
+    connect_host=ask('本机连接地址（填 - 使用面板域名解析）',default_host)
+    if connect_host=='-':connect_host=''
+    ca_file=ask('自签名证书的 CA 文件绝对路径（公共可信证书直接回车）')
+    local_port=port_number(ask('监控本机端口','8098'))
+    https_port=8443
+    if network=='tailnet':
+        https_port=port_number(ask('Tailnet HTTPS 端口（请勿使用订阅端口）','8443'))
+        require_route_available(current,dns,https_port,f'http://127.0.0.1:{local_port}')
+    with socket.socket() as sock:sock.bind(('0.0.0.0' if network=='direct' else '127.0.0.1',local_port))
+    origin=f'http://127.0.0.1:{local_port}' if network=='local' else ''
+    web_username=web_password=tls_cert=tls_key=''
+    if network in ('proxy','direct'):
+        origin=ask('网页 HTTPS 地址 / Dashboard HTTPS origin (scheme + host + port)')
+        web_username=ask('监控登录用户名 / Dashboard username','admin')
+        web_password=ask('监控登录密码（至少16字符）/ Dashboard password (16+ characters)',secret=True)
+        if network=='direct':
+            tls_cert=ask('HTTPS 证书文件 / TLS certificate file')
+            tls_key=ask('HTTPS 私钥文件 / TLS private key file',secret=True)
+    panel_link=ask('已有面板 HTTPS 入口 / Existing panel HTTPS link (optional)')
+    timezone=ask('显示时区','Asia/Shanghai')
+    cfg=make_config(dns,veid,key,panel_url,username,password,local_port,https_port,connect_host,ca_file,panel_link,timezone,token,network,origin,web_username,web_password,tls_cert,tls_key)
+    print('只读检查 / Read-only API compatibility checks…')
     monitor.Panel(cfg['panel']).fetch()
-    provider.fetch(cfg['provider'])
-    print('检查通过 / Checks passed. Installing the isolated monitor service.')
+    if key:provider.fetch(cfg['provider'])
+    print('检查通过 / Checks passed.')
     return cfg
 
 
 def preflight(cfg):
     monitor.validate(cfg)
+    if not cfg.get('installer',{}).get('manage_serve',True):
+        origin=urlsplit(cfg['web'].get('public_origin',''))
+        local=origin.hostname in ('127.0.0.1','::1','localhost')
+        if not origin.hostname or origin.username or origin.query or origin.fragment or origin.path not in ('','/') or (not local and (origin.scheme!='https' or not cfg['web'].get('auth'))):
+            raise ValueError('External origin requires authenticated HTTPS')
+        if cfg['web'].get('tls_cert'):
+            import ssl
+            context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(cfg['web']['tls_cert'],cfg['web']['tls_key'])
+        return None
     dns, current = tailnet()
     origin = urlsplit(cfg['web'].get('public_origin', ''))
     if origin.scheme != 'https' or origin.hostname != dns or origin.username or origin.query or origin.fragment or origin.path not in ('', '/'):
@@ -166,18 +178,22 @@ def preflight(cfg):
 
 
 def prepare_ca(path):
-    cfg = json.loads(Path(path).read_text(encoding='utf-8'))
-    source = cfg['panel'].get('ca_file')
-    if source:
-        destination = ROOT/'panel-ca.crt'
-        if Path(source).resolve() != destination.resolve():
-            shutil.copyfile(source,destination)
-        destination.chmod(0o640)
-        cfg['panel']['ca_file'] = str(destination)
-        Path(path).write_text(json.dumps(cfg,ensure_ascii=False,indent=2),encoding='utf-8')
+    cfg=json.loads(Path(path).read_text(encoding='utf-8'))
+    for section,key,name in [('panel','ca_file','panel-ca.crt'),('web','tls_cert','web-cert.pem'),('web','tls_key','web-key.pem')]:
+        source=cfg[section].get(key)
+        if source:
+            destination=ROOT/name
+            if Path(source).resolve()!=destination.resolve():shutil.copyfile(source,destination)
+            destination.chmod(0o640)
+            cfg[section][key]=str(destination)
+    Path(path).write_text(json.dumps(cfg,ensure_ascii=False,indent=2),encoding='utf-8')
 
 
 def activate_serve(cfg):
+    if not cfg.get('installer',{}).get('manage_serve',True):
+        print('监控入口 / Dashboard: '+cfg['web']['public_origin']+'/')
+        print('Reverse proxy mode: configure HTTPS forwarding separately; firewall unchanged.')
+        return
     dns, port, proxy, current = preflight(cfg)
     web, _, _ = route(current, dns, port)
     if not web:
@@ -224,10 +240,8 @@ def main():
         elif args.preflight:
             cfg = json.loads(Path(args.preflight).read_text(encoding='utf-8'))
             preflight(cfg)
-            if not cfg.get('provider',{}).get('veid') or not cfg.get('provider',{}).get('api_key'):
-                raise ValueError('仅支持 BandwagonHost：请配置 VEID 和 API Key / BandwagonHost VEID and API Key required')
             monitor.Panel(cfg['panel']).fetch()
-            provider.fetch(cfg['provider'])
+            if cfg.get('provider',{}).get('api_key'):provider.fetch(cfg['provider'])
             print('3x-ui / KiwiVM 只读检查通过 / Read-only API checks passed.')
         elif args.serve:
             activate_serve(json.loads(Path(args.serve).read_text(encoding='utf-8')))

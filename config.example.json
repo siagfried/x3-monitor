@@ -12,17 +12,22 @@
   "web": {
     "host": "127.0.0.1",
     "port": 8098,
-    "auth": false,
-    "public_origin": "https://YOUR-TAILNET-HOST:8443"
+    "auth": true,
+    "public_origin": "https://monitor.example.com",
+    "username": "admin",
+    "password": "CHANGE_TO_16_OR_MORE_RANDOM_CHARACTERS",
+    "tls_cert": "",
+    "tls_key": ""
   },
   "timezone": "Asia/Shanghai",
   "interval_seconds": 60,
   "max_gap_seconds": 150,
   "database": "/opt/x3-monitor/data/monitor.sqlite3",
   "retention_days": 365,
-  "panel_link": "https://YOUR-TAILNET-HOST:8444/YOUR_PANEL_BASE_PATH/",
-  "provider": {
-    "veid": "YOUR_VEID",
-    "api_key": ""
+  "panel_link": "",
+  "provider": {},
+  "installer": {
+    "network": "proxy",
+    "manage_serve": false
   }
 }

@@ -16,3 +16,5 @@ backups/
 .x3-monitor-owned
 *.tar
 *.zip
+
+panel-ca.crt

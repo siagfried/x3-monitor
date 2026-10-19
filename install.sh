@@ -4,13 +4,13 @@ umask 077
 ROOT=/opt/x3-monitor
 UNIT=/etc/systemd/system/x3-monitor.service
 SOURCE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-FILES=(monitor.py dashboard.html push_support.py provider.py configure.py sw.js manifest.webmanifest icon.svg install_dependencies.py initialize_push.py requirements.txt uninstall.sh)
-echo 'X3 Monitor · 仅支持 BandwagonHost（搬瓦工）/ BandwagonHost only'
+FILES=(billing.py monitor.py dashboard.html push_support.py provider.py configure.py sw.js manifest.webmanifest icon.svg install_dependencies.py initialize_push.py requirements.txt uninstall.sh)
+echo 'X3 Monitor · 支持任意 VPS；Tailscale / BandwagonHost API 可选 / Any VPS; optional Tailnet and provider API'
 echo '必须预先安装并运行 3x-ui / A working 3x-ui installation is required.'
 echo '仅安装独立监控服务；不安装、修改或重启 3x-ui / Xray。'
 echo 'Installs the monitor only; never installs, modifies or restarts 3x-ui / Xray.'
 if [[ ${1:-} == --dry-run && $# -eq 1 ]]; then
-  echo 'PLAN: interactive VEID/API + panel setup -> read-only checks -> isolated venv -> systemd -> Tailnet HTTPS only.'
+  echo 'PLAN: interactive VEID/API + panel setup -> read-only checks -> isolated venv -> systemd -> optional Tailnet or authenticated HTTPS.'
   echo 'Existing configuration/history and unrelated Tailscale routes are preserved; no Funnel or firewall changes.'
   exit 0
 fi
@@ -40,7 +40,7 @@ cleanup() {
     echo '安装失败，恢复先前程序 / Installation failed; restoring previous program.' >&2
     if (( ! HAD_SERVE )) && [[ -f $ROOT/.serve-owned.json && -f $ROOT/configure.py ]]; then python3 "$ROOT/configure.py" --remove-serve; fi
     systemctl stop x3-monitor.service
-    for f in "${FILES[@]}" config.json vapid-private.pem panel-ca.crt; do rm -f -- "$ROOT/$f"; done
+    for f in "${FILES[@]}" config.json vapid-private.pem panel-ca.crt web-cert.pem web-key.pem; do rm -f -- "$ROOT/$f"; done
     if [[ -f $TEMP/prior.tar ]]; then tar -xf "$TEMP/prior.tar" -C "$ROOT"; fi
     rm -rf -- "$ROOT/venv"
     if (( HAD_VENV )); then mv -- "$TEMP/old-venv" "$ROOT/venv"; fi
@@ -82,7 +82,7 @@ if [[ -f $ROOT/.x3-monitor-owned ]]; then
   if systemctl is-active --quiet x3-monitor.service; then WAS_ACTIVE=1; fi
   if systemctl is-enabled --quiet x3-monitor.service; then WAS_ENABLED=1; fi
   prior=()
-  for f in "${FILES[@]}" config.json vapid-private.pem panel-ca.crt; do [[ ! -f $ROOT/$f ]] || prior+=("$f"); done
+  for f in "${FILES[@]}" config.json vapid-private.pem panel-ca.crt web-cert.pem web-key.pem; do [[ ! -f $ROOT/$f ]] || prior+=("$f"); done
   if (( ${#prior[@]} )); then tar -cf "$TEMP/prior.tar" -C "$ROOT" "${prior[@]}"; fi
 fi
 [[ ! -f $UNIT ]] || cp -- "$UNIT" "$TEMP/unit.before"
@@ -96,11 +96,12 @@ mv -- "$TEMP/venv" "$ROOT/venv"
 for f in "${FILES[@]}"; do install -m 0640 -o root -g x3-monitor "$SOURCE/$f" "$ROOT/$f"; done
 if [[ ! -f $ROOT/config.json ]]; then install -m 0640 -o root -g x3-monitor "$CONFIG" "$ROOT/config.json"; fi
 python3 "$ROOT/configure.py" --prepare-ca "$ROOT/config.json"
-if [[ -f $ROOT/panel-ca.crt ]]; then chown root:x3-monitor "$ROOT/panel-ca.crt"; fi
+for cert in panel-ca.crt web-cert.pem web-key.pem; do if [[ -f $ROOT/$cert ]]; then chown root:x3-monitor "$ROOT/$cert"; fi; done
 "$ROOT/venv/bin/python" "$ROOT/initialize_push.py" "$ROOT/config.json"
 chown -R root:x3-monitor "$ROOT/venv"
 chmod -R g+rX,o-rwx "$ROOT/venv"
-chown root:x3-monitor "$ROOT/vapid-private.pem" "$ROOT/config.json"
+chown root:x3-monitor "$ROOT/config.json"
+if [[ -f $ROOT/vapid-private.pem ]]; then chown root:x3-monitor "$ROOT/vapid-private.pem"; fi
 chmod 0640 "$ROOT/config.json"
 "$ROOT/venv/bin/python" "$ROOT/monitor.py" --config "$ROOT/config.json" --check
 install -m 0644 "$SOURCE/x3-monitor.service" "$UNIT"

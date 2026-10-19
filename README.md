@@ -1,142 +1,116 @@
 # X3 Monitor
 
-**仅支持 BandwagonHost（搬瓦工），必须预先安装并运行 3x-ui。**
+独立的 3x-ui 流量活跃监控：Python venv + systemd + SQLite，60 秒采样。
+Independent 3x-ui activity monitoring with an isolated Python venv, systemd, SQLite and 60-second sampling.
 
-**BandwagonHost only. A working 3x-ui installation is required before installation.**
+**需预先安装并运行 3x-ui。不限制 VPS 服务商；Tailscale 与 BandwagonHost API 均为可选。**
+**An existing working 3x-ui installation is required. Any VPS provider is supported; Tailscale and BandwagonHost API are optional.**
 
-X3 Monitor 是独立部署的客户端流量活跃监控：60 秒采样、Python venv、systemd、SQLite，仅通过 Tailnet HTTPS 访问。它不会安装、修改或重启 3x-ui / Xray，也不会修改订阅配置、公共订阅端口或防火墙。
+![X3 Monitor dashboard](docs/images/dashboard.png)
 
-An isolated client activity dashboard with 60-second sampling, Python venv, systemd and SQLite. The Web UI is available only over Tailnet HTTPS. The installer does not install, modify or restart 3x-ui / Xray and does not change subscriptions, public subscription ports or firewall rules.
+*示例客户端和流量，不含真实服务器或个人资料。Example clients and traffic, not production or personal data.*
 
-## 安装前 / Prerequisites
+## 安装 / Install
 
-- BandwagonHost VPS，已有可登录的 3x-ui 与可用 API。需要面板完整地址（含端口、路径）、用户名及密码，或已有 API Token。不要填订阅地址。启用两步验证时，建议使用可用的 API Token。
-- Debian / Ubuntu 等 Linux，正在运行的 systemd，root / sudo，Python 3.10+ 和 `python3-venv`、可信 CA 证书。
-- 本机已安装并登录 Tailscale，已启用 MagicDNS 与 Tailnet HTTPS。安装向导不代为登录 Tailscale、不修改 ACL、不启用 Funnel。
-- 能访问 PyPI 和 KiwiVM API。推送依赖仅安装到独立 venv。
+需要 Linux、运行中的 systemd、root/sudo、Python 3.10+、python3-venv、可信 CA 证书，以及可登录的已有 3x-ui API。准备完整面板地址（端口和路径）、API Token 或用户名密码，**不要填订阅地址**。依赖从 PyPI 安装到独立 venv。
 
-Requirements: a BandwagonHost VPS with a working 3x-ui API; Linux with systemd, root/sudo, Python 3.10+, `python3-venv` and trusted CA certificates; Tailscale already installed and signed in, with MagicDNS and Tailnet HTTPS available; outbound access to PyPI and the KiwiVM API. Provide the panel URL with its base path and credentials or API token, **not** the subscription URL. Prefer an API token when panel 2FA is enabled.
+Requires Linux, systemd, root/sudo, Python 3.10+, python3-venv, trusted CA certificates and a working existing 3x-ui API. Provide the panel URL with port/base path and a token or credentials—not the subscription URL. Dependencies are installed from PyPI into the venv.
 
-缺少 Python 组件时，可先运行（Debian / Ubuntu）：
+缺少 Python 组件时 / Missing Python components (Debian/Ubuntu):
 
 ```bash
 sudo apt-get install python3 python3-venv ca-certificates
 ```
 
-## 一键安装 / Install
-
-本仓库为私人仓库。先在目标机器使用你自己的 GitHub 账号授权 GitHub CLI，或从 GitHub 下载源代码 ZIP 后解压。不要将 GitHub Token 或 KiwiVM 密钥嵌入下载链接。
-
-This repository is private. Authenticate GitHub CLI on the target machine using your own account, or download and extract the source ZIP from GitHub. Do not embed credentials in download URLs.
-
-已登录 GitHub CLI 后，一行获取源码并启动向导：
-
-```bash
-gh repo clone siagfried/x3-monitor && cd x3-monitor && sudo bash install.sh
-```
-
-已下载完整源码时 / From an extracted checkout:
+下载完整源码后启动中英文向导 / Start the bilingual wizard from the complete source tree:
 
 ```bash
 sudo bash install.sh
 ```
 
-安装器启动时显示中英文前提说明与 VEID/API Key 获取方式，随后交互输入：
-
-1. VEID、API Key（隐藏输入）。
-2. 3x-ui API 地址、Token 或用户名和密码（隐藏输入）。
-3. 本机连接方式、可选自签 CA、监控端口（默认 8098）。
-4. Tailnet HTTPS 端口（默认 8443，必须空闲）。
-5. 可选的**已有** 3x-ui Tailnet 管理入口、显示时区（默认 `Asia/Shanghai`）。
-
-The bilingual wizard asks for VEID/API key, 3x-ui API connection details, an optional CA file, loopback port, a free Tailnet HTTPS port, optional existing Tailnet panel link and display timezone. Secrets are entered without echo. Preflight checks verify both APIs before installing the service.
-
-安装后自动启动并启用开机自启，最终显示本机的 `https://<device>.<tailnet>.ts.net:<port>/` 入口。监控无需额外用户名密码；仍受 Tailnet 访问策略约束。密码和密钥仅存于 `/opt/x3-monitor/config.json`（`root:x3-monitor`、`0640`），临时配置由受限临时目录清理。不要在带 `-x` 的调试会话中安装或分享配置文件。
-
-The service starts immediately and is enabled at boot. The installer prints the Tailnet-only dashboard URL. The dashboard has no additional login; Tailnet policy controls access. Credentials remain in a restricted local configuration and are not committed to this repository.
-
-仅查看计划 / Preview without changes:
+或一行获取源码并安装 / Download and install a tagged version:
 
 ```bash
-bash install.sh --dry-run
+curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.1.0.tar.gz -o x3-monitor-v1.1.0.tar.gz && tar -xzf x3-monitor-v1.1.0.tar.gz && cd x3-monitor-1.1.0 && sudo bash install.sh
 ```
 
-高级配置 / Advanced: copy `config.example.json`, fill it in under a restricted directory, then run `sudo bash install.sh /absolute/path/config.json`. Public monitor origins and occupied unrelated Tailnet routes are rejected. Existing managed installations retain their current config and history even if a config argument is supplied.
+密码、密钥隐藏输入；安装后自动启动并开机自启。不安装、修改或重启 3x-ui/Xray，不改动订阅和防火墙。
+Secrets are entered without echo. The monitor starts and is enabled at boot. The installer never installs, modifies or restarts 3x-ui/Xray or changes subscriptions/firewall rules.
 
-## VEID / API Key 获取方式 / Where to obtain them
+只看计划 / Preview: `bash install.sh --dry-run`。
+高级 / Advanced: fill in `config.example.json` in a restricted directory, then run `sudo bash install.sh /absolute/path/config.json`. Existing managed installations keep their current configuration/history, even if a new config argument is supplied.
 
-1. 登录 [BandwagonHost 客户中心](https://bandwagonhost.com/clientarea.php)。
-2. 打开 **Services → My Services → 目标 VPS → KiwiVM Control Panel**。
-3. 在 KiwiVM 左侧点击 **API**，复制页面显示的 **VEID**。
-4. 点击 **Show API Key** 查看现有密钥。不要随意使用 Reset API Key，重置会使其他应用中的旧密钥失效。
+## 访问方式 / Access modes
 
-Sign in to the [BandwagonHost client area](https://bandwagonhost.com/clientarea.php), open your VPS in **Services → My Services**, launch **KiwiVM Control Panel**, then open **API**. Copy VEID and reveal the existing key using **Show API Key**. Avoid resetting a key used by other applications. The authenticated API page also provides the [KiwiVM API reference](https://kiwivm.64clouds.com/api-doc.php).
+| 方式 / Mode | 行为 / Behavior |
+| --- | --- |
+| Tailnet（可选） | Tailscale 已安装、登录并启用 MagicDNS/HTTPS。仅增加选定 Serve 端口，不启用 Funnel、不改动其他路由。Requires Tailscale already signed in; adds only the selected Serve route. |
+| HTTPS 反向代理 / Reverse proxy | 默认。绑定 loopback，启用监控登录；需自行配置已有 HTTPS 代理。Default; loopback listener with authentication; configure the HTTPS proxy separately. |
+| 直接 HTTPS / Direct HTTPS | 需要有效证书、私钥和登录密码，绑定 `0.0.0.0`；防火墙自行配置。Requires certificate/key and authentication; firewall unchanged. |
+| 本机 HTTP / Local HTTP | 仅 `127.0.0.1`，适合本机或 SSH 隧道，不启用推送。Loopback only; push disabled. |
 
-本程序固定只读查询白名单：`getServiceInfo`、`getAuditLog`、`backup/list`、`snapshot/list`、`getSuspensionDetails`、`getPolicyViolations`。不提供开关机、重装、删除或恢复备份等操作。API Key 本身可能具有更广的供应商权限，应仅存放在可信服务器。
+公网方式要求 HTTPS 和至少 16 字符的登录密码。GET、POST 均校验登录，写入还检查 Origin。配置和复制的私钥保存在服务器受限目录（`root:x3-monitor`、`0640`）。
+Public access requires HTTPS and a password of at least 16 characters. Reads and writes require authentication; writes also validate Origin. Config and copied keys stay in restricted local files.
 
-The application enforces the read-only allowlist above. It does not implement power controls, reinstall, backup deletion or restore. The key itself may have broader provider permissions; keep it on a trusted server.
+代理模式不安装代理、不签发证书、不开防火墙。将 HTTPS 代理指向 `http://127.0.0.1:8098`（或配置端口），保留 Authorization/Origin。直接 HTTPS 复制安装时的证书，续期后需更新 `/opt/x3-monitor/web-cert.pem` 和 `web-key.pem`，保持权限并重启监控。
+Proxy mode needs a separately configured HTTPS proxy forwarding to the loopback port with Authorization/Origin preserved. Direct HTTPS uses copied certificates; update the copies after renewal and restart the monitor.
 
-## 网络边界 / Tailnet-only access
+3x-ui 管理页和订阅的访问范围保持原样。可填写已有面板 HTTPS 链接；主题同步需要另行配置兼容桥接。
+Panel/subscription exposure stays unchanged. An existing panel HTTPS link is optional; theme synchronization needs a separate compatible bridge.
 
-Web 服务仅绑定 `127.0.0.1`，Tailscale Serve 将选定的 HTTPS 端口转发至它；不启用公网 Funnel，不监听 `0.0.0.0`，不重置其他 Serve 端口。目标端口存在其他转发或 Funnel 时，安装会停止。参见 [Tailscale Serve 官方文档](https://tailscale.com/docs/reference/tailscale-cli/serve) 与 [Serve/Funnel 访问范围](https://tailscale.com/docs/features/tailscale-funnel)。
+## 无 API：手动设置 / No provider API
 
-The monitor binds loopback only. The installer adds only the chosen Tailscale Serve HTTPS route and never enables Funnel or resets unrelated routes. A conflicting route or Funnel on that port stops installation.
+VEID 回车即可跳过供应商 API，适用于其他 VPS 服务商。右上角系统状态中可设置：下次重置日期和时分、已用流量、总流量。默认已用 0、总量 1000 GB、每月 8 日 00:00。
+Leave VEID blank to skip provider APIs. System status lets you edit the next reset date/time, used baseline and total allowance. Defaults: zero used, 1000 GB, monthly reset on day 8 at 00:00.
 
-**3x-ui 原有管理页是否公开，由其已有配置决定。安装器不会自动收紧面板公网访问，也不会创建新的面板转发；先将面板管理入口设置为仅 Tailnet 可访问，再填入可选入口链接。订阅可以继续保留公网访问。**
+设置按显示时区保存，新的客户端采样流量继续累加到自定义已用量。每月在所设日期、时刻归零；短月份用月底，之后恢复原始日号。GB 为 `1024³` 字节。当期额度独立保存，不受 365 天历史清理影响。
+Settings use the displayed timezone. New sampled traffic adds to the baseline. Monthly resets use the chosen local day/time; short months use their last day, then restore the original day. GB is `1024³` bytes. The allowance ledger is independent of history pruning.
 
-The installer does not change the existing panel's exposure. Configure the 3x-ui management page for Tailnet-only access separately, then supply its existing Tailnet link if desired. Public subscriptions can remain available independently. The optional link merely opens the panel; panel theme synchronization needs a separately configured compatible theme bridge.
+**手动用量是 3x-ui 客户端上下行之和，不是供应商对整台 VPS 的官方计费。** 不含未采样系统流量；中断或计数器重置可能漏计，跨重置时刻按区间时间比例估算；不自动回填安装前用量。
+**Manual usage is sampled client upload/download, not authoritative whole-VPS billing.** Unmonitored traffic is excluded; gaps/resets may lose data, reset-spanning samples are proportional estimates, and pre-install traffic is not backfilled.
 
-## 功能 / Features
+无 API 时显示本机运行时间、负载、可用内存、磁盘和手动额度，不伪造供应商套餐、机房、操作、备份或违规记录。
+Without an API, local resources and manual allowance remain available; provider records are not fabricated.
 
-- 中英文切换、深浅主题，电脑三列、平板两列、手机单列。
-- 总览固定第一，客户端独立日历，统一六行日期高度。无使用无底色，少于 2 小时浅青绿、达到 2 小时深青绿。
-- 每日时间轴及活跃时段提示：时间范围、上下行流量。采样流量在区间内按时间比例分摊，因此单段流量为估计值。
-- 选择卡片可排序、关注；设备图标可更换。排序、关注和设备图标由服务器保存；语言、主题由浏览器保存。
-- 未选中时隐藏“今日”和零值时间／流量，保留占位；选中时显示。
-- 关注客户端从无流量转为活跃时 Web Push 通知；首次观测和采集恢复不提醒。
-- 官方已用／总流量、精确重置时间，应用供应商流量倍率；以 `data_next_reset` 为准，不按固定“每月 8 日零点”推算。
-- 系统状态：本机资源、KiwiVM 操作日志、自动备份与快照、暂停／违规记录（接口提供时）。备份只展示元数据，不提供下载、恢复或删除操作。
-- 历史记录保留 365 天；独立安装与安全卸载。
+## 可选 BandwagonHost API / Optional provider API
 
-Features: Chinese/English UI, light/dark themes, responsive 3/2/1-column layout, pinned overview, per-client calendars and daily timelines, shared ordering/favorites/icons, Web Push activity alerts, authoritative KiwiVM bandwidth and reset time, system resources, provider audit/backup/issue metadata and 365-day retention.
+自动供应商对接目前仅支持 KiwiVM；其他服务商使用手动模式。登录 [BandwagonHost 客户中心](https://bandwagonhost.com/clientarea.php)，依次进入 **Services → My Services → 目标 VPS → KiwiVM Control Panel → API**，复制 VEID，点击 **Show API Key**。不要重置其他应用正在使用的密钥。
+The optional automatic integration is for KiwiVM; other providers use manual mode. Open the client area, launch KiwiVM for the VPS and open API. Copy VEID and reveal the existing key with Show API Key. Avoid resetting keys used elsewhere. See the [KiwiVM API page](https://kiwivm.64clouds.com/api-doc.php).
 
-“活跃”指采样区间有流量，不代表真实连接在线。每日总览使用时长按客户端累加，可超过 24 小时。KiwiVM 总流量和客户端采样统计的范围不同，不保证数值相等。界面 GB 使用 `1024³` 字节，与现有 KiwiVM 统计换算保持一致。
+有 API 时使用官方流量、倍率和 `data_next_reset`，禁止手动改额度。只读白名单：`getServiceInfo`、`getAuditLog`、`backup/list`、`snapshot/list`、`getSuspensionDetails`、`getPolicyViolations`。不实现开关机、重装、删除或恢复备份。密钥本身可能有更广权限，仅存可信服务器。
+With an API, official counters/reset time are authoritative; manual writes are disabled. Only the read-only allowlist above is implemented. Keep the key on a trusted server because the key itself may have broader privileges.
 
-Active means traffic observed during a sampling interval, not an exact connection state. Overview duration sums all clients and may exceed 24 hours. Provider bandwidth and per-client sampled traffic have different scopes. GB is displayed using `1024³` bytes.
+## 界面和通知 / UI and notifications
 
-通知需要在每个设备的浏览器允许并订阅。网页关闭后可通过浏览器厂商推送服务接收加密消息；完全退出浏览器、禁用后台运行或系统通知权限时不保证送达。iOS/iPadOS 可能需要添加到主屏幕。该安装器不会替用户授权或发送通知。
+中英文、深浅主题、电脑三列/平板两列/手机单列；固定总览、六行月历、每日时间轴、排序/关注/设备图标。少于 2 小时浅青绿，达到 2 小时深青绿。未选中时隐藏“今日”和零值统计，保留占位。排序/关注/图标由服务器共享；主题/语言由浏览器保存。
+Chinese/English UI, themes, responsive 3/2/1-column layout, overview, calendars/timelines and shared ordering/favorites/icons. Theme/language are browser-local.
 
-Notifications require browser permission and subscription on each device. Background delivery depends on browser/OS support; installation does not grant permission or send notifications automatically.
+活跃仅指 60 秒采样区间观测到流量，不等于连接在线；总览时长按客户端累加，可超过 24 小时。历史保留 365 天。
+Active means observed traffic, not exact connection state. Combined duration may exceed 24 hours. History is retained for 365 days.
 
-## 升级和卸载 / Upgrade and uninstall
+后台通知需 HTTPS、浏览器/设备授权和关注客户端；仅无流量转活跃时提醒，首次观测和采集恢复不提醒。浏览器厂商推送服务转发加密内容，送达取决于设备/浏览器后台权限；iOS/iPadOS 可能需添加至主屏幕。本机 HTTP 模式禁用推送。
+Background alerts require HTTPS and device/browser permission. Delivery depends on OS/browser support. Local HTTP mode disables push.
 
-更新源码后再次运行 `sudo bash install.sh`。保留配置、VAPID 密钥及历史；依赖准备好后才短暂重启监控服务。切换程序失败时回滚先前程序。3x-ui / Xray 不重启。
+## 升级、卸载和验证 / Upgrade, uninstall and checks
 
-Update the checkout and rerun the installer. Existing config, push identity and history are retained. Dependencies are prepared before interrupting the monitor; failed upgrades restore the previous program. The panel and Xray are not restarted.
+更新源码后再次运行安装器，保留现有配置、密钥和历史；失败时回滚先前监控程序。
+Rerun the updated installer to retain config/keys/history. Failed program switches restore the prior monitor.
 
 ```bash
-# 停止并移除监控程序，保留配置和历史 / Keep config and history
+# 保留配置和历史 / Keep configuration and history
 sudo bash /opt/x3-monitor/uninstall.sh
-
-# 完全清理：交互输入确认短语 / Purge requires an exact interactive confirmation
+# 完全清理，需精确确认短语 / Exact interactive confirmation required
 sudo bash /opt/x3-monitor/uninstall.sh --purge
-```
-
-卸载仅删除安装器记录且仍与原配置完全匹配的监控 Serve 路由。外部创建的路由、面板访问防护、订阅和服务账号保留。若路由已被其他配置改变，卸载会停止并提示检查。默认保留的配置含密钥，请继续保护。
-
-Uninstall removes only an unchanged Serve route owned by this installer. External routes, panel protection, subscriptions and the service account remain. Modified routes are preserved for manual review. Retained configuration still contains secrets.
-
-## 验证 / Validation
-
-```bash
+# Tests
 python3 -m unittest discover -s tests
 bash tests/scripts.sh
 ```
 
-36 项自动化测试及隔离安装／升级／回滚／卸载分支测试已通过。`tests/scripts.sh` 使用临时目录与模拟 systemd/account，不操作真实 `/opt`。这验证安装逻辑，不等于在任意新 VPS 上完成了真实安装、证书签发或浏览器通知实收。当前没有在现有生产监控上重新执行安装器。
+仅移除本安装器拥有且未更改的 Serve 路由；外部转发、面板、订阅和服务账号保留。默认保留的配置含凭据，请继续保护。
+Only unchanged owned Serve routes are removed. External routes, panel, subscriptions and account remain. Retained config contains credentials.
 
-36 automated tests and sandbox installation/upgrade/rollback/uninstall checks passed. These validate logic, not a completed installation or certificate issuance on every new VPS. Web Push receipt requires device-level acceptance. The installer has not been rerun against the existing production monitor.
+42 项测试、隔离安装/升级/回滚/卸载和示例浏览器手动修改/重载持久化检查通过。公网代理、证书续期需目标环境验收；现有生产监控没有改为公网。
+42 tests, sandbox install/upgrade/rollback/uninstall and example-browser persistence checks passed. Proxy/TLS renewal need target acceptance; existing production monitoring was not exposed publicly.
 
-本项目为独立监控工具，与 BandwagonHost、Tailscale、3x-ui 官方无隶属关系。
-
-An independent monitoring tool, not affiliated with BandwagonHost, Tailscale or 3x-ui.
+本项目与 3x-ui、BandwagonHost、Tailscale 无官方隶属关系。
+Not affiliated with 3x-ui, BandwagonHost or Tailscale.

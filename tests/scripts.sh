@@ -27,7 +27,7 @@ echo 'PASS: syntax, dry runs, invalid arguments, ownership guard, purge guard, d
 
 # Exercise install/upgrade control flow with mocked account, Python and systemd.
 # Actual file copy/mkdir/chmod execute only under the sandbox.
-cp "$SRC/configure.py" "$SRC/monitor.py" "$SRC/dashboard.html" "$SRC/push_support.py" "$SRC/provider.py" "$SRC/sw.js" "$SRC/manifest.webmanifest" "$SRC/icon.svg" "$SRC/install_dependencies.py" "$SRC/initialize_push.py" "$SRC/requirements.txt" "$SRC/x3-monitor.service" "$SANDBOX/"
+cp "$SRC/billing.py" "$SRC/configure.py" "$SRC/monitor.py" "$SRC/dashboard.html" "$SRC/push_support.py" "$SRC/provider.py" "$SRC/sw.js" "$SRC/manifest.webmanifest" "$SRC/icon.svg" "$SRC/install_dependencies.py" "$SRC/initialize_push.py" "$SRC/requirements.txt" "$SRC/x3-monitor.service" "$SANDBOX/"
 printf '{}\n' > "$SANDBOX/input.json"
 sed -e "s|/opt/x3-monitor|$ROOT|g" -e "s|/etc/systemd/system/x3-monitor.service|$SANDBOX/system/x3-monitor.service|g" -e 's/\[\[ $EUID -eq 0 \]\]/true/' -e 's|\[\[ -d /run/systemd/system \]\]|true|' "$SRC/install.sh" > "$SANDBOX/install.sh"
 cat > "$SANDBOX/bin/python3" <<'SH'

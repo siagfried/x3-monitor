@@ -11,7 +11,10 @@ path = Path(sys.argv[1])
 cfg = json.loads(path.read_text())
 origin = cfg['web'].get('public_origin', '')
 if not origin.startswith('https://'):
-    raise SystemExit('Set web.public_origin to the Tailnet HTTPS origin')
+    cfg['push']={}
+    path.write_text(json.dumps(cfg,ensure_ascii=False,indent=2),encoding='utf-8')
+    print('HTTP local mode: background push disabled / 本机 HTTP 模式不启用后台推送')
+    raise SystemExit(0)
 keypath = path.parent / 'vapid-private.pem'
 if keypath.exists():
     key = serialization.load_pem_private_key(keypath.read_bytes(), password=None)

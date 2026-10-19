@@ -26,6 +26,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import provider
+import billing
 from push_support import preferences, valid_subscription, activity_events, enqueue, deliver_once
 
 
@@ -160,7 +161,7 @@ def normalize(inbounds):
     return rows
 
 
-def ingest(db, rows, now, interval=60, gap=150):
+def ingest(db, rows, now, interval=60, gap=150, billing_tz=None):
     with db:
         for row in rows:
             old = db.execute('SELECT * FROM clients WHERE id=?', (row['id'],)).fetchone()
@@ -187,6 +188,8 @@ def ingest(db, rows, now, interval=60, gap=150):
                        (row['id'], start, now, state, up, down, note))
             db.execute('INSERT OR REPLACE INTO clients VALUES(?,?,?,?,?,?,?)',
                        (row['id'], row['email'], row['inbound'], now, row['up'], row['down'], row['enabled']))
+        if billing_tz is not None:
+            billing.account(db,billing_tz,now)
         activity_events(db, now)
         db.execute('INSERT OR REPLACE INTO health VALUES(?,1,?)', (now, 'ok'))
 
@@ -313,14 +316,18 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # No query strings, identities or credentials in access logs.
 
-    def do_GET(self):
+    def authorized(self):
         if self.server.cfg['web'].get('auth', True):
             expected = 'Basic ' + base64.b64encode((self.server.cfg['web']['username'] + ':' + self.server.cfg['web']['password']).encode()).decode()
             if not hmac.compare_digest(self.headers.get('Authorization', ''), expected):
                 self.send_response(401)
                 self.send_header('WWW-Authenticate', 'Basic realm="X3 Monitor", charset="UTF-8"')
                 self.end_headers()
-                return
+                return False
+        return True
+
+    def do_GET(self):
+        if not self.authorized():return
         url = urllib.parse.urlsplit(self.path)
         try:
             if url.path == '/':
@@ -338,6 +345,11 @@ class Handler(BaseHTTPRequestHandler):
                     row = db.execute("SELECT value FROM preferences WHERE name='push_delivery'").fetchone()
                     value['push_delivery'] = json.loads(row[0]) if row else None
                     value['provider'] = provider.status(db, ZoneInfo(self.server.cfg['timezone']))
+                    if not self.server.cfg.get('provider',{}).get('api_key'):
+                        local=value['provider']
+                        value['provider']=dict(local,**billing.status(db,ZoneInfo(self.server.cfg['timezone'])))
+                        value['provider']['details']={}
+                    else:value['provider']['mode']='api'
                 return self.reply(200, 'application/json', json.dumps(value).encode())
             if url.path not in ('/api/report', '/export.csv'):
                 return self.reply(404, 'text/plain', b'Not found')
@@ -363,7 +375,8 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(500, 'text/plain', b'Report unavailable')
 
     def do_POST(self):
-        # Browser writes must originate from this exact Tailnet dashboard.
+        if not self.authorized():return
+        # Writes require authentication (where configured) and this exact origin.
         if self.headers.get('Origin') != self.server.cfg['web'].get('public_origin'):
             return self.reply(403, 'text/plain', b'Origin rejected')
         try:
@@ -374,7 +387,11 @@ class Handler(BaseHTTPRequestHandler):
             path = urllib.parse.urlsplit(self.path).path
             now = int(time.time())
             with closing(connect(self.server.cfg['database'])) as db, db:
-                if path == '/api/preferences':
+                if path == '/api/billing':
+                    if self.server.cfg.get('provider',{}).get('api_key'):
+                        return self.reply(409,'text/plain',b'Provider API mode is authoritative')
+                    billing.configure(db,value,ZoneInfo(self.server.cfg['timezone']))
+                elif path == '/api/preferences':
                     known = {r[0] for r in db.execute('SELECT id FROM clients')}
                     for key in ['order', 'favorites']:
                         if not isinstance(value.get(key), list) or len(value[key]) != len(set(value[key])) or not set(value[key]) <= known:
@@ -429,10 +446,10 @@ def validate(cfg):
     if not 60 < cfg['max_gap_seconds'] <= 300:
         raise ValueError('invalid max_gap_seconds')
     ZoneInfo(cfg['timezone'])
-    if cfg['web'].get('auth', True) and (len(cfg['web'].get('password','')) < 16 or cfg['web']['password'].startswith('CHANGE')):
+    if cfg['web'].get('auth', True) and (not cfg['web'].get('username') or len(cfg['web'].get('password','')) < 16 or cfg['web']['password'].startswith('CHANGE')):
         raise ValueError('set web password, at least 16 characters')
-    if cfg['web']['host'] not in ('127.0.0.1', '::1'):
-        raise ValueError('web must bind loopback; use SSH tunnel or HTTPS reverse proxy')
+    if cfg['web']['host'] not in ('127.0.0.1', '::1') and not (cfg['web'].get('auth') and cfg['web'].get('tls_cert') and cfg['web'].get('tls_key')):
+        raise ValueError('non-loopback listeners require authentication and TLS certificate/key')
     if not cfg['panel'].get('token') and not (cfg['panel'].get('username') and cfg['panel'].get('password')):
         raise ValueError('configure panel credentials')
     Panel(cfg['panel'])
@@ -462,7 +479,7 @@ def main():
                 started = time.monotonic()
                 try:
                     rows = panel.fetch()
-                    ingest(db, rows, int(time.time()), gap=cfg['max_gap_seconds'])
+                    ingest(db, rows, int(time.time()), gap=cfg['max_gap_seconds'],billing_tz=None if cfg.get('provider',{}).get('api_key') else ZoneInfo(cfg['timezone']))
                 except Exception as exc:
                     # Class only: remote API messages/URLs may contain secrets.
                     with db:
@@ -496,6 +513,10 @@ def main():
         with db:
             db.execute('INSERT OR REPLACE INTO health VALUES(?,0,?)', (int(time.time()), 'starting'))
     server = ThreadingHTTPServer((cfg['web']['host'], cfg['web']['port']), Handler)
+    if cfg['web'].get('tls_cert'):
+        context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cfg['web']['tls_cert'],cfg['web']['tls_key'])
+        server.socket=context.wrap_socket(server.socket,server_side=True)
     server.cfg = cfg
     worker = threading.Thread(target=collect)
     worker.start()
