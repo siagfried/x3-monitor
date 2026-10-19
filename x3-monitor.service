@@ -1,0 +1,28 @@
+[Unit]
+Description=X3 Monitor read-only activity collector and dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=x3-monitor
+Group=x3-monitor
+WorkingDirectory=/opt/x3-monitor
+ExecStart=/opt/x3-monitor/venv/bin/python /opt/x3-monitor/monitor.py --config /opt/x3-monitor/config.json
+Restart=on-failure
+RestartSec=10
+MemoryMax=128M
+CPUQuota=25%
+TasksMax=32
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/x3-monitor/data
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

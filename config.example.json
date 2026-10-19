@@ -1,0 +1,28 @@
+{
+  "panel": {
+    "url": "https://YOUR-PANEL-CERTIFICATE-DOMAIN:52833/YOUR_PANEL_BASE_PATH/",
+    "username": "admin",
+    "password": "",
+    "token": "",
+    "ca_file": "",
+    "timeout": 15,
+    "list_path": "panel/api/inbounds/list",
+    "connect_host": "127.0.0.1"
+  },
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8098,
+    "auth": false,
+    "public_origin": "https://YOUR-TAILNET-HOST:8443"
+  },
+  "timezone": "Asia/Shanghai",
+  "interval_seconds": 60,
+  "max_gap_seconds": 150,
+  "database": "/opt/x3-monitor/data/monitor.sqlite3",
+  "retention_days": 365,
+  "panel_link": "https://YOUR-TAILNET-HOST:8444/YOUR_PANEL_BASE_PATH/",
+  "provider": {
+    "veid": "YOUR_VEID",
+    "api_key": ""
+  }
+}
