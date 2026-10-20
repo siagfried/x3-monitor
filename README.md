@@ -10,7 +10,8 @@
 
 ## 功能
 
-- 总览与客户端月历、每日时间轴，悬浮查看时间和流量。
+- 可折叠的总览与客户端月历，年 / 月 / 日时间轴和悬浮详情。
+- 自动同步 3x-ui 客户端增删，同名客户端显示入站名称。
 - 客户端排序、设备图标、特别关注和上线通知。
 - 中文 / English、深浅主题，适配电脑与手机。
 - 查看服务器状态，保留最近一年的记录。
@@ -21,7 +22,7 @@
 在服务器一键下载并启动中英文安装向导：
 
 ```bash
-curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.1.3.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.1.3 && sudo bash install.sh
+curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.2.0.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.2.0 && sudo bash install.sh
 ```
 
 VEID 和 API Key 在 `install.sh` 执行过程中按提示填写，无需提前修改文件；API Key 隐藏输入。VEID 留空则跳过 API，使用手动流量模式。

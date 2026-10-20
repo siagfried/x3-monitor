@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """X3 Monitor: read-only traffic sampling, stdlib only, Python >=3.10."""
 import argparse
+import bisect
+import calendar
 import base64
 import csv
 from contextlib import closing
@@ -147,24 +149,40 @@ def normalize(inbounds):
             if not email or email in found:
                 raise ValueError('missing or duplicate client email')
             found.add(email)
+            # Explicit settings membership is authoritative; counters may outlive a deletion.
+            if 'clients' in settings and email not in configured:
+                continue
             client = configured.get(email, {})
             key = str(inbound['id']) + ':' + email
             rows.append(dict(id=key, email=email, inbound=str(inbound['id']),
+                             inbound_name=str(inbound.get('remark') or inbound['id']),
                              up=max(0, int(stat['up'])), down=max(0, int(stat['down'])),
                              enabled=bool(inbound.get('enable', True) and client.get('enable', stat.get('enable', True)))))
         # A configured client without counters is unknown, never fabricated as zero.
         for email in configured.keys() - found:
             rows.append(dict(id=str(inbound['id']) + ':' + email, email=email,
-                             inbound=str(inbound['id']), up=None, down=None, enabled=False))
+                             inbound=str(inbound['id']), inbound_name=str(inbound.get('remark') or inbound['id']),
+                             up=None, down=None, enabled=False))
     if len({r['id'] for r in rows}) != len(rows):
         raise ValueError('duplicate identity')
     return rows
 
 
+def current_clients(db):
+    row = db.execute("SELECT value FROM preferences WHERE name='current_clients'").fetchone()
+    return set(json.loads(row[0])) if row else None
+
+
 def ingest(db, rows, now, interval=60, gap=150, billing_tz=None):
     with db:
+        previous_members = current_clients(db)
+        saved_names = db.execute("SELECT value FROM preferences WHERE name='inbound_names'").fetchone()
+        inbound_names = json.loads(saved_names[0]) if saved_names else {}
         for row in rows:
+            inbound_names[row['inbound']] = row.get('inbound_name') or row['inbound']
             old = db.execute('SELECT * FROM clients WHERE id=?', (row['id'],)).fetchone()
+            if previous_members is not None and row['id'] not in previous_members:
+                old = None  # Recreated clients start a fresh baseline, with no phantom traffic or alert.
             start, state, up, down, note = now, 'unknown', 0, 0, 'baseline'
             valid = row['up'] is not None and row['down'] is not None
             if old and now > old['seen']:
@@ -188,6 +206,10 @@ def ingest(db, rows, now, interval=60, gap=150, billing_tz=None):
                        (row['id'], start, now, state, up, down, note))
             db.execute('INSERT OR REPLACE INTO clients VALUES(?,?,?,?,?,?,?)',
                        (row['id'], row['email'], row['inbound'], now, row['up'], row['down'], row['enabled']))
+        db.execute("INSERT OR REPLACE INTO preferences VALUES('inbound_names',?)",
+                   (json.dumps(inbound_names),))
+        db.execute("INSERT OR REPLACE INTO preferences VALUES('current_clients',?)",
+                   (json.dumps([row['id'] for row in rows]),))
         if billing_tz is not None:
             billing.account(db,billing_tz,now)
         activity_events(db, now)
@@ -207,9 +229,14 @@ def report(db, begin, end, tz, now=None, stale=150):
     now = int(time.time()) if now is None else now
     clients = [dict(r) for r in db.execute('SELECT * FROM clients ORDER BY email')]
     health = db.execute('SELECT * FROM health ORDER BY ts DESC LIMIT 1').fetchone()
+    members = current_clients(db)
+    saved_names = db.execute("SELECT value FROM preferences WHERE name='inbound_names'").fetchone()
+    inbound_names = json.loads(saved_names[0]) if saved_names else {}
     for c in clients:
+        c['inbound_name'] = inbound_names.get(c['inbound']) or c['inbound']
+        c['present'] = members is None or c['id'] in members
         latest = db.execute('SELECT state FROM samples WHERE client=? ORDER BY end DESC LIMIT 1', (c['id'],)).fetchone()
-        c['status'] = latest['state'] if now-c['seen'] <= stale and health and health['ok'] else 'unknown'
+        c['status'] = latest['state'] if c['present'] and now-c['seen'] <= stale and health and health['ok'] else 'unknown'
         c['daily'], c['sessions'], c['timeline'] = {}, [], []
         session = None
         for r in db.execute('SELECT * FROM samples WHERE client=? AND end>? AND start<? ORDER BY end', (c['id'], begin, end)):
@@ -259,6 +286,90 @@ def report(db, begin, end, tz, now=None, stale=150):
         t = stop
     return dict(now=now, health=dict(health) if health else None, clients=clients,
                 timezone=str(tz), begin=begin, end=end, days=days, overview=aggregate_overview(clients))
+
+
+def period_report(db, scope, tz, now=None, next_reset=None):
+    """Compact calendar-period totals without returning a year of raw segments."""
+    now = int(time.time()) if now is None else now
+    local = dt.datetime.fromtimestamp(now, tz)
+    if scope not in ('year', 'month'):
+        raise ValueError('invalid summary scope')
+    begin = local.replace(month=1 if scope == 'year' else local.month,
+                          day=1, hour=0, minute=0, second=0, microsecond=0)
+    if scope == 'year':
+        finish = begin.replace(year=begin.year+1)
+    else:
+        finish = (begin.replace(day=28)+dt.timedelta(days=4)).replace(day=1)
+    if scope == 'month' and next_reset:
+        finish = dt.datetime.fromtimestamp(next_reset, tz)
+        previous = finish.replace(day=1)-dt.timedelta(days=1)
+        begin = finish.replace(year=previous.year, month=previous.month,
+                               day=min(finish.day, calendar.monthrange(previous.year, previous.month)[1]))
+    bins = []
+    cursor = begin
+    while cursor < finish:
+        stop = ((cursor.replace(day=28)+dt.timedelta(days=4)).replace(day=1)
+                if scope == 'year' else (cursor+dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0))
+        stop = min(stop, finish)
+        bins.append(dict(start=int(cursor.timestamp()), end=int(stop.timestamp()),
+                         label=cursor.strftime('%Y-%m' if scope == 'year' else '%Y-%m-%d')))
+        cursor = stop
+    fields = ('active_seconds', 'unknown_seconds', 'up', 'down')
+    def empty():
+        return dict(totals=dict.fromkeys(fields, 0), bins=[dict.fromkeys(fields, 0) for _ in bins])
+    clients = {row[0]: empty() for row in db.execute('SELECT id FROM clients')}
+    overview = empty()
+    for index, bucket in enumerate(bins):
+        a, b = bucket['start'], min(bucket['end'], now)
+        if b <= a:
+            continue
+        rows = db.execute('''SELECT client,
+            SUM(CASE WHEN state='active' THEN MIN(end,?)-MAX(start,?) ELSE 0 END),
+            SUM(CASE WHEN state='unknown' THEN MIN(end,?)-MAX(start,?) ELSE 0 END),
+            SUM(up*1.0*(MIN(end,?)-MAX(start,?))/(end-start)),
+            SUM(down*1.0*(MIN(end,?)-MAX(start,?))/(end-start))
+            FROM samples WHERE end>? AND start<? AND end>start GROUP BY client''',
+            (b,a,b,a,b,a,b,a,a,b))
+        for row in rows:
+            if row[0] not in clients:
+                continue
+            for field, value in zip(fields, row[1:]):
+                value = value or 0
+                clients[row[0]]['bins'][index][field] = value
+                clients[row[0]]['totals'][field] += value
+                overview['bins'][index][field] += value
+                overview['totals'][field] += value
+    # Occupancy preserves hourly usage in a billing month and daily usage in a natural year.
+    slots = []
+    for group, bucket in enumerate(bins):
+        stamp = bucket['start']
+        while stamp < bucket['end']:
+            local_slot = dt.datetime.fromtimestamp(stamp, tz)
+            stop = (int((local_slot.replace(hour=0, minute=0, second=0, microsecond=0)
+                         + dt.timedelta(days=1)).timestamp()) if scope == 'year'
+                    else int(local_slot.replace(minute=0, second=0, microsecond=0).timestamp())+3600)
+            stop = min(stop, bucket['end'])
+            slots.append(dict(start=stamp, end=stop, group=group))
+            stamp = stop
+    starts = [slot['start'] for slot in slots]
+    occupied = {key: set() for key in clients}
+    union = set()
+    for row in db.execute("SELECT client,start,end FROM samples WHERE state='active' AND up+down>0 AND end>? AND start<?",
+                          (int(begin.timestamp()), min(now, int(finish.timestamp())))):
+        if row[0] not in occupied:
+            continue
+        a, b = max(row[1], int(begin.timestamp())), min(row[2], now, int(finish.timestamp()))
+        index = max(0, bisect.bisect_right(starts, a)-1)
+        while index < len(slots) and slots[index]['start'] < b:
+            if slots[index]['end'] > a:
+                occupied[row[0]].add(index)
+                union.add(index)
+            index += 1
+    for key, value in clients.items():
+        value['active_slots'] = sorted(occupied[key])
+    overview['active_slots'] = sorted(union)
+    return dict(scope=scope, begin=int(begin.timestamp()), end=int(finish.timestamp()),
+                timezone=str(tz), now=now, bins=bins, slots=slots, clients=clients, overview=overview)
 
 
 def aggregate_overview(clients):
@@ -351,6 +462,14 @@ class Handler(BaseHTTPRequestHandler):
                         value['provider']['details']={}
                     else:value['provider']['mode']='api'
                 return self.reply(200, 'application/json', json.dumps(value).encode())
+            if url.path == '/api/period':
+                scope = urllib.parse.parse_qs(url.query).get('scope', ['month'])[0]
+                with closing(connect(self.server.cfg['database'])) as db:
+                    tz = ZoneInfo(self.server.cfg['timezone'])
+                    status = (provider.status(db, tz) if self.server.cfg.get('provider', {}).get('api_key')
+                              else billing.status(db, tz))
+                    result = period_report(db, scope, tz, next_reset=status.get('info', {}).get('next_reset_ts'))
+                return self.reply(200, 'application/json', json.dumps(result).encode())
             if url.path not in ('/api/report', '/export.csv'):
                 return self.reply(404, 'text/plain', b'Not found')
             tz = ZoneInfo(self.server.cfg['timezone'])

@@ -1,7 +1,8 @@
-# v1.1.0 Validation
+# v1.2.0 Validation
 
-- 42 Python tests: sampling, sanitization, manual accounting, reset boundaries, short months, persisted baselines, invalid values, API/manual isolation, GET/POST authentication and Tailnet route guards.
-- Sandbox checks: fresh install, retained-config upgrade, failed-initialization rollback, safe uninstall and exact purge confirmation.
-- Example browser: manual edits persist after reload; no provider/Tailscale required; README screenshot uses example data only.
-- Production configuration and Tailnet-only exposure remain unchanged; no 3x-ui/Xray restart.
-- Public proxy/direct TLS modes require target-specific certificates and acceptance. No public production deployment was performed.
+- 52 Python tests covering sampling, retained history, client membership changes, recreated-client baselines, inbound names, billing-cycle summaries, hourly/month and daily/year occupancy, and existing security/configuration checks.
+- JavaScript syntax checked; browser verification covers calendar expansion, independent columns, loading text, year/month/day modes, timeline clipping and padding, hidden deleted clients, and inbound labels for duplicate names.
+- Installer/uninstaller sandbox checks cover fresh installation, retained-config upgrades, failed-initialization rollback, ownership guards and purge confirmation.
+- Public source/package scanned against production secrets and identifiers; README screenshot contains example data only.
+- Production monitor updated and checked. Existing 3x-ui/Xray processes and access settings remain unchanged.
+- Browser acceptance covers the existing Tailnet deployment. Other access modes require target-specific certificates and acceptance.
