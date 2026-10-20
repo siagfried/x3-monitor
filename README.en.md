@@ -4,14 +4,17 @@
 
 View 3x-ui client activity, usage duration and traffic across different servers and access options.
 
-![X3 Monitor dashboard preview](docs/images/dashboard.png)
+![Tile mode · Light theme](docs/images/dashboard.png)
 
-*The screenshot uses example data.*
+![Group mode · Dark theme](docs/images/dashboard-grouped-dark.png)
+
+*IP addresses, client names and usage figures are example data.*
 
 ## Features
 
 - Collapsible overview and client calendars, year / month / day timelines and hover details.
 - Automatic client list synchronization with inbound names for duplicate client names.
+- Tile / group modes, multiple expanded and locked cards, batch moves and group management.
 - Client ordering, device icons, favorites and activity notifications.
 - Chinese / English, light / dark themes and responsive layouts.
 - Server status and up to one year of history.
@@ -22,7 +25,7 @@ View 3x-ui client activity, usage duration and traffic across different servers 
 Download and launch the bilingual installer in one command:
 
 ```bash
-curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.2.0.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.2.0 && sudo bash install.sh
+curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.3.0.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.3.0 && sudo bash install.sh
 ```
 
 Enter VEID and API Key when prompted during `install.sh`; no file editing is needed. API Key input is hidden. Leave VEID blank to skip the API and use manual traffic settings.

@@ -9,7 +9,32 @@ def preferences(db):
     row = db.execute("SELECT value FROM preferences WHERE name='layout'").fetchone()
     value = json.loads(row[0]) if row else {'order': [], 'favorites': []}
     value.setdefault('icons', {})
+    value.setdefault('groups', [])
+    value.setdefault('group_members', {})
+    value.setdefault('ungrouped_view', 2)
     return value
+
+
+def validate_groups(groups, members, known):
+    if not isinstance(groups, list) or len(groups)>64 or not isinstance(members, dict):
+        raise ValueError('invalid groups')
+    clean=[]
+    ids=set()
+    for group in groups:
+        if not isinstance(group, dict):raise ValueError('invalid group')
+        key, name=group.get('id'),group.get('name')
+        if (not isinstance(key,str) or not 1<=len(key)<=64 or
+            not all(c.isascii() and (c.isalnum() or c in '-_') for c in key) or key in ids or
+            not isinstance(name,str) or not 1<=len(name.strip())<=40 or
+            not isinstance(group.get('hidden',False),bool)):
+            raise ValueError('invalid group')
+        ids.add(key)
+        view=group.get('view',0 if group.get('hidden',False) else 2)
+        if type(view) is not int or view not in (0,1,2):raise ValueError('invalid group view')
+        clean.append(dict(id=key,name=name.strip(),hidden=view!=2,view=view))
+    if not set(members)<=known or any(not isinstance(value,str) or value not in ids for value in members.values()):
+        raise ValueError('invalid group membership')
+    return clean,dict(members)
 
 
 def valid_subscription(value):

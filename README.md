@@ -4,14 +4,17 @@
 
 查看 3x-ui 客户端的活跃时段、使用时长和流量，支持多种服务器与访问方式。
 
-![X3 Monitor 界面预览](docs/images/dashboard.png)
+![平铺模式 · 浅色主题](docs/images/dashboard.png)
 
-*截图使用示例数据。*
+![分组模式 · 深色主题](docs/images/dashboard-grouped-dark.png)
+
+*截图中的 IP、客户端名称和用量均为示例数据。*
 
 ## 功能
 
 - 可折叠的总览与客户端月历，年 / 月 / 日时间轴和悬浮详情。
 - 自动同步 3x-ui 客户端增删，同名客户端显示入站名称。
+- 平铺 / 分组模式、多卡片展开与锁定、批量移动和分组管理。
 - 客户端排序、设备图标、特别关注和上线通知。
 - 中文 / English、深浅主题，适配电脑与手机。
 - 查看服务器状态，保留最近一年的记录。
@@ -22,7 +25,7 @@
 在服务器一键下载并启动中英文安装向导：
 
 ```bash
-curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.2.0.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.2.0 && sudo bash install.sh
+curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.3.0.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.3.0 && sudo bash install.sh
 ```
 
 VEID 和 API Key 在 `install.sh` 执行过程中按提示填写，无需提前修改文件；API Key 隐藏输入。VEID 留空则跳过 API，使用手动流量模式。

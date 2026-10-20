@@ -1,8 +1,8 @@
-# v1.2.0 Validation
+# v1.3.0 Validation
 
-- 52 Python tests covering sampling, retained history, client membership changes, recreated-client baselines, inbound names, billing-cycle summaries, hourly/month and daily/year occupancy, and existing security/configuration checks.
-- JavaScript syntax checked; browser verification covers calendar expansion, independent columns, loading text, year/month/day modes, timeline clipping and padding, hidden deleted clients, and inbound labels for duplicate names.
+- 59 Python tests cover sampling, history retention, client membership, billing-cycle summaries, hourly traffic, group preferences, and security/configuration checks.
+- JavaScript syntax checked. Browser verification covers tile/group layouts, multi-card expansion, group summaries, 14-column overview calendars, per-card locks and refresh persistence, reset-day dots, current-day lines, and desktop/mobile layouts.
 - Installer/uninstaller sandbox checks cover fresh installation, retained-config upgrades, failed-initialization rollback, ownership guards and purge confirmation.
-- Public source/package scanned against production secrets and identifiers; README screenshot contains example data only.
-- Production monitor updated and checked. Existing 3x-ui/Xray processes and access settings remain unchanged.
-- Browser acceptance covers the existing Tailnet deployment. Other access modes require target-specific certificates and acceptance.
+- Public source, Git history and release assets are scanned for production credentials and identifiers before upload. Both README images use example IP addresses, names and usage; ancillary image metadata is removed.
+- Acceptance covers the existing Tailnet deployment. Other access modes need target-specific certificate and browser acceptance.
+- Original screenshots, production configuration, history databases, keys, logs, caches and temporary preview tools are excluded from the release.

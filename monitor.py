@@ -29,7 +29,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 import provider
 import billing
-from push_support import preferences, valid_subscription, activity_events, enqueue, deliver_once
+from push_support import preferences, valid_subscription, activity_events, enqueue, deliver_once, validate_groups
 
 
 def connect(path):
@@ -237,7 +237,7 @@ def report(db, begin, end, tz, now=None, stale=150):
         c['present'] = members is None or c['id'] in members
         latest = db.execute('SELECT state FROM samples WHERE client=? ORDER BY end DESC LIMIT 1', (c['id'],)).fetchone()
         c['status'] = latest['state'] if c['present'] and now-c['seen'] <= stale and health and health['ok'] else 'unknown'
-        c['daily'], c['sessions'], c['timeline'] = {}, [], []
+        c['daily'], c['sessions'], c['timeline'], c['hourly'] = {}, [], [], {}
         session = None
         for r in db.execute('SELECT * FROM samples WHERE client=? AND end>? AND start<? ORDER BY end', (c['id'], begin, end)):
             a, b = max(begin, r['start']), min(end, r['end'])
@@ -256,9 +256,14 @@ def report(db, begin, end, tz, now=None, stale=150):
             while t < b:
                 local = dt.datetime.fromtimestamp(t, tz)
                 midnight = dt.datetime.combine(local.date()+dt.timedelta(days=1), dt.time(), tz)
-                stop = min(b, int(midnight.timestamp()))
+                hour_start = int(local.replace(minute=0,second=0,microsecond=0).timestamp())
+                stop = min(b, int(midnight.timestamp()), hour_start+3600)
                 day = c['daily'].setdefault(str(local.date()), dict(active_seconds=0, unknown_seconds=0, up=0, down=0))
                 seconds = stop-t
+                hour = c['hourly'].setdefault(str(hour_start),dict(start=hour_start,end=hour_start+3600,up=0,down=0,active_seconds=0))
+                if r['state']=='active':hour['active_seconds'] += seconds
+                for field in ('up','down'):
+                    hour[field] += r[field]*seconds/(r['end']-r['start'])
                 if r['state'] == 'active':
                     day['active_seconds'] += seconds
                 if r['state'] == 'unknown':
@@ -373,7 +378,7 @@ def period_report(db, scope, tz, now=None, next_reset=None):
 
 
 def aggregate_overview(clients):
-    value = dict(id='__overview__', email='总览', inbound='', status='idle', daily={}, timeline=[], sessions=[])
+    value = dict(id='__overview__', email='总览', inbound='', status='idle', daily={}, timeline=[], sessions=[], hourly={})
     events = {}
     for client in clients:
         if client['status'] == 'active':
@@ -382,6 +387,9 @@ def aggregate_overview(clients):
             target = value['daily'].setdefault(date, dict(active_seconds=0, unknown_seconds=0, up=0, down=0))
             for key in target:
                 target[key] += daily[key]
+        for key, hour in client.get('hourly',{}).items():
+            target = value['hourly'].setdefault(key,dict(start=hour['start'],end=hour['end'],up=0,down=0,active_seconds=0))
+            for field in ('up','down','active_seconds'):target[field] += hour[field]
         for piece in client['timeline']:
             seconds = piece['end'] - piece['start']
             if seconds <= 0:
@@ -520,6 +528,14 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError('invalid device icons')
                     saved = {k: value[k] for k in ['order', 'favorites']}
                     saved['icons'] = icons
+                    previous = preferences(db)
+                    saved['groups'],saved['group_members'] = validate_groups(
+                        value.get('groups',previous['groups']),
+                        value.get('group_members',previous['group_members']),known)
+                    ungrouped_view=value.get('ungrouped_view',previous['ungrouped_view'])
+                    if type(ungrouped_view) is not int or ungrouped_view not in (0,1,2):
+                        raise ValueError('invalid ungrouped view')
+                    saved['ungrouped_view']=ungrouped_view
                     db.execute("INSERT OR REPLACE INTO preferences VALUES('layout',?)", (json.dumps(saved),))
                 elif path == '/api/push/subscribe':
                     endpoint = valid_subscription(value)
