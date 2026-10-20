@@ -18,7 +18,15 @@
 
 ## 安装
 
-在服务器下载源码并启动中英文向导：
+在服务器一键下载并启动中英文安装向导：
+
+```bash
+curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.1.1.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.1.1 && sudo bash install.sh
+```
+
+VEID 和 API Key 在 `install.sh` 执行过程中按提示填写，无需提前修改文件；API Key 隐藏输入。VEID 留空则跳过 API，使用手动流量模式。
+
+也可下载源码后安装：
 
 ```bash
 git clone https://github.com/siagfried/x3-monitor.git

@@ -18,7 +18,15 @@ View 3x-ui client activity, usage duration and traffic across different servers 
 
 ## Install
 
-Download the source on your server and start the bilingual setup wizard:
+Download and launch the bilingual installer in one command:
+
+```bash
+curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.1.1.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.1.1 && sudo bash install.sh
+```
+
+Enter VEID and API Key when prompted during `install.sh`; no file editing is needed. API Key input is hidden. Leave VEID blank to skip the API and use manual traffic settings.
+
+Alternatively, install from a source checkout:
 
 ```bash
 git clone https://github.com/siagfried/x3-monitor.git
