@@ -232,6 +232,19 @@ def report(db, begin, end, tz, now=None, stale=150):
     members = current_clients(db)
     saved_names = db.execute("SELECT value FROM preferences WHERE name='inbound_names'").fetchone()
     inbound_names = json.loads(saved_names[0]) if saved_names else {}
+    hours = {}
+    def hour_info(stamp):
+        # A UTC hour may contain two local hours in half/quarter-hour zones.
+        entries = hours.setdefault(stamp//3600, [])
+        for entry in entries:
+            if entry[0] <= stamp < entry[1]:
+                return entry
+        local = dt.datetime.fromtimestamp(stamp, tz)
+        start = int(local.replace(minute=0, second=0, microsecond=0).timestamp())
+        midnight = int(dt.datetime.combine(local.date()+dt.timedelta(days=1), dt.time(), tz).timestamp())
+        entry = (start, min(midnight, start+3600), str(local.date()))
+        entries.append(entry)
+        return entry
     for c in clients:
         c['inbound_name'] = inbound_names.get(c['inbound']) or c['inbound']
         c['present'] = members is None or c['id'] in members
@@ -245,7 +258,7 @@ def report(db, begin, end, tz, now=None, stale=150):
                 continue
             piece = dict(start=a, end=b, state=r['state'], note=r['note'], up=r['up']*(b-a)/(r['end']-r['start']), down=r['down']*(b-a)/(r['end']-r['start']))
             previous_piece = c['timeline'][-1] if c['timeline'] else None
-            if previous_piece and previous_piece['end'] == a and previous_piece['state'] == piece['state'] and previous_piece['note'] == piece['note'] and dt.datetime.fromtimestamp(previous_piece['start'],tz).date() == dt.datetime.fromtimestamp(b-1,tz).date():
+            if previous_piece and previous_piece['end'] == a and previous_piece['state'] == piece['state'] and previous_piece['note'] == piece['note'] and hour_info(previous_piece['start'])[2] == hour_info(b-1)[2]:
                 previous_piece['end'] = b
                 previous_piece['up'] += piece['up']
                 previous_piece['down'] += piece['down']
@@ -254,14 +267,19 @@ def report(db, begin, end, tz, now=None, stale=150):
             # Deltas spanning midnight/gaps are estimated proportionally by elapsed seconds.
             t = a
             while t < b:
-                local = dt.datetime.fromtimestamp(t, tz)
-                midnight = dt.datetime.combine(local.date()+dt.timedelta(days=1), dt.time(), tz)
-                hour_start = int(local.replace(minute=0,second=0,microsecond=0).timestamp())
-                stop = min(b, int(midnight.timestamp()), hour_start+3600)
-                day = c['daily'].setdefault(str(local.date()), dict(active_seconds=0, unknown_seconds=0, up=0, down=0))
+                hour_start, hour_end, date = hour_info(t)
+                stop = min(b, hour_end)
+                day = c['daily'].setdefault(date, dict(active_seconds=0, unknown_seconds=0, up=0, down=0))
                 seconds = stop-t
-                hour = c['hourly'].setdefault(str(hour_start),dict(start=hour_start,end=hour_start+3600,up=0,down=0,active_seconds=0))
-                if r['state']=='active':hour['active_seconds'] += seconds
+                hour = c['hourly'].setdefault(str(hour_start),dict(start=hour_start,end=hour_start+3600,up=0,down=0,active_seconds=0,spans=[]))
+                if r['state']=='active':
+                    hour['active_seconds'] += seconds
+                    previous = hour['spans'][-1] if hour['spans'] else None
+                    if previous and previous['end']==t:
+                        previous['end']=stop
+                        for field in ('up','down'):previous[field]+=r[field]*seconds/(r['end']-r['start'])
+                    else:
+                        hour['spans'].append(dict(start=t,end=stop,up=r['up']*seconds/(r['end']-r['start']),down=r['down']*seconds/(r['end']-r['start'])))
                 for field in ('up','down'):
                     hour[field] += r[field]*seconds/(r['end']-r['start'])
                 if r['state'] == 'active':
@@ -289,8 +307,9 @@ def report(db, begin, end, tz, now=None, stale=150):
         stop = min(end, int(dt.datetime.combine(local.date()+dt.timedelta(days=1), dt.time(), tz).timestamp()))
         days.append(dict(date=str(local.date()), start=t, end=stop))
         t = stop
+    overview = aggregate_overview(clients)
     return dict(now=now, health=dict(health) if health else None, clients=clients,
-                timezone=str(tz), begin=begin, end=end, days=days, overview=aggregate_overview(clients))
+                timezone=str(tz), begin=begin, end=end, days=days, overview=overview)
 
 
 def period_report(db, scope, tz, now=None, next_reset=None):
@@ -388,8 +407,9 @@ def aggregate_overview(clients):
             for key in target:
                 target[key] += daily[key]
         for key, hour in client.get('hourly',{}).items():
-            target = value['hourly'].setdefault(key,dict(start=hour['start'],end=hour['end'],up=0,down=0,active_seconds=0))
+            target = value['hourly'].setdefault(key,dict(start=hour['start'],end=hour['end'],up=0,down=0,active_seconds=0,spans=[]))
             for field in ('up','down','active_seconds'):target[field] += hour[field]
+            target['spans'].extend(hour.get('spans',[]))
         for piece in client['timeline']:
             seconds = piece['end'] - piece['start']
             if seconds <= 0:
@@ -431,7 +451,56 @@ def prune_history(db, days, now=None):
         db.execute('DELETE FROM push_outbox WHERE next_attempt<?', (cutoff,))
 
 
+class SummaryCache:
+    """Bounded, single-flight response cache; failed computations are not retained."""
+    def __init__(self, ttl=60, limit=12, clock=time.monotonic):
+        self.ttl, self.limit, self.clock = ttl, limit, clock
+        self.condition = threading.Condition()
+        self.values, self.pending = {}, set()
+
+    def get(self, key, compute):
+        with self.condition:
+            while True:
+                cached = self.values.get(key)
+                if cached and self.clock()-cached[0] < self.ttl:
+                    return cached[1]
+                if key not in self.pending:
+                    self.pending.add(key)
+                    break
+                self.condition.wait()
+        try:
+            value = compute()
+            with self.condition:
+                self.values.pop(key, None)
+                self.values[key] = (self.clock(), value)
+                while len(self.values) > self.limit:
+                    self.values.pop(next(iter(self.values)))
+            return value
+        finally:
+            with self.condition:
+                self.pending.discard(key)
+                self.condition.notify_all()
+
+
+def summary_revision(db):
+    # Indexed end timestamp plus small metadata tables; no history scan.
+    latest = db.execute('SELECT MAX(end) FROM samples').fetchone()[0]
+    health = db.execute('SELECT * FROM health ORDER BY ts DESC LIMIT 1').fetchone()
+    clients = tuple(map(tuple, db.execute('SELECT * FROM clients ORDER BY id')))
+    layout = tuple(map(tuple, db.execute("SELECT name,value FROM preferences WHERE name IN ('layout','current_clients','inbound_names') ORDER BY name")))
+    return latest, tuple(health) if health else (), clients, layout
+
+
 class Handler(BaseHTTPRequestHandler):
+    _cache_init_lock = threading.Lock()
+
+    def cached_summary(self, key, compute):
+        with self._cache_init_lock:
+            cache = getattr(self.server, 'summary_cache', None)
+            if cache is None:
+                cache = self.server.summary_cache = SummaryCache()
+        return cache.get(key, compute)
+
     def log_message(self, *_):
         pass  # No query strings, identities or credentials in access logs.
 
@@ -476,16 +545,20 @@ class Handler(BaseHTTPRequestHandler):
                     tz = ZoneInfo(self.server.cfg['timezone'])
                     status = (provider.status(db, tz) if self.server.cfg.get('provider', {}).get('api_key')
                               else billing.status(db, tz))
-                    result = period_report(db, scope, tz, next_reset=status.get('info', {}).get('next_reset_ts'))
-                return self.reply(200, 'application/json', json.dumps(result).encode())
+                    reset = status.get('info', {}).get('next_reset_ts')
+                    key = ('period', scope, str(tz), reset, str(dt.datetime.now(tz).date()), summary_revision(db))
+                    payload = self.cached_summary(key, lambda: json.dumps(period_report(db, scope, tz, next_reset=reset)).encode())
+                return self.reply(200, 'application/json', payload)
             if url.path not in ('/api/report', '/export.csv'):
                 return self.reply(404, 'text/plain', b'Not found')
             tz = ZoneInfo(self.server.cfg['timezone'])
             begin, end = date_range(urllib.parse.parse_qs(url.query), tz)
             with closing(connect(self.server.cfg['database'])) as db:
+                if url.path == '/api/report':
+                    key = ('report', begin, end, str(tz), self.server.cfg['max_gap_seconds'], summary_revision(db))
+                    payload = self.cached_summary(key, lambda: json.dumps(report(db, begin, end, tz, stale=self.server.cfg['max_gap_seconds'])).encode())
+                    return self.reply(200, 'application/json', payload)
                 result = report(db, begin, end, tz, stale=self.server.cfg['max_gap_seconds'])
-            if url.path == '/api/report':
-                return self.reply(200, 'application/json', json.dumps(result).encode())
             buf = io.StringIO()
             writer = csv.writer(buf)
             writer.writerow(['client', 'inbound', 'date', 'active_seconds', 'unknown_seconds', 'up_bytes_estimated', 'down_bytes_estimated'])

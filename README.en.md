@@ -12,11 +12,11 @@ View 3x-ui client activity, usage duration and traffic across different servers 
 
 ## Features
 
-- Collapsible overview and client calendars, year / month / day timelines and hover details.
+- Collapsible overview and client calendars, four usage colors, year / month / day timelines and hover details.
 - Automatic client list synchronization with inbound names for duplicate client names.
 - Tile / group modes, multiple expanded and locked cards, batch moves and group management.
 - Client ordering, device icons, favorites and activity notifications.
-- Chinese / English, light / dark themes and responsive layouts.
+- Chinese / English, theme-aware popovers, light / dark themes and responsive layouts.
 - Server status and up to one year of history.
 - Optional BandwagonHost traffic integration or manual allowance and reset settings.
 
@@ -25,7 +25,7 @@ View 3x-ui client activity, usage duration and traffic across different servers 
 Download and launch the bilingual installer in one command:
 
 ```bash
-curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.3.1.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.3.1 && sudo bash install.sh
+curl -fL https://github.com/siagfried/x3-monitor/archive/refs/tags/v1.4.0.tar.gz -o x3-monitor.tar.gz && tar -xzf x3-monitor.tar.gz && cd x3-monitor-1.4.0 && sudo bash install.sh
 ```
 
 Enter VEID and API Key when prompted during `install.sh`; no file editing is needed. API Key input is hidden. Leave VEID blank to skip the API and use manual traffic settings.
